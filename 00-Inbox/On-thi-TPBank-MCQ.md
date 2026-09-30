@@ -11,6 +11,7 @@
 | 1b | SQL — Advanced | [x] | 2026-09-30 | 7/8 |
 | 1c | Advanced DE — Applied (extraction/CDC/idempotency) | [x] | 2026-09-30 | 3/5 |
 | 2 | Database Fundamentals | [ ] | | /15 |
+| 2b | Database Fundamentals — DE Hard | [~] Q1–Q4 done, Q5–Q8 pending | 2026-10-01 | 2/4 |
 | 3 | DE Concepts | [ ] | | /15 |
 | 4 | Big Data Tools | [ ] | | /15 |
 
@@ -18,7 +19,7 @@
 
 ---
 
-## Tổng kết tiến độ (cập nhật 2026-09-30)
+## Tổng kết tiến độ (cập nhật 2026-10-01)
 
 ### ✅ Đã ôn & nắm được
 
@@ -43,6 +44,8 @@
 2. `LIKE '%...'` (leading wildcard) → **không dùng được index**; `LIKE '...%'` thì được.
 3. Consistent multi-row read → cần **Repeatable Read/Snapshot**, không phải Read Committed.
 4. Bảng partition → **overwrite partition**, không MERGE toàn bảng.
+5. Watermark theo `updated_at` → transaction **commit muộn** bị bỏ sót vĩnh viễn (`updated_at` = lúc ghi, không phải lúc commit). Sửa: lookback window + MERGE idempotent, hoặc CDC theo LSN.
+6. 2 job song song "check rồi insert" ở Repeatable Read (snapshot isolation) → **cả hai đều qua check**, load trùng (phantom/write skew). Chặn bằng **UNIQUE constraint**, không trông vào isolation level.
 
 ---
 
@@ -514,6 +517,100 @@ D. Use a larger VARCHAR
 <details><summary>Answer</summary>
 
 **B.** Keep an audit/history table or effective-dated (temporal) rows so every change is preserved. Overwriting loses history.
+</details>
+
+---
+
+## 2b. Database Fundamentals — DE Hard (extraction, concurrency, load)
+
+> Harder, DE-oriented (not backend). Options are similar in length and wording; the correct letter is randomized. Source DB is PostgreSQL unless stated otherwise.
+
+**Q1.** A nightly extraction job opens one `REPEATABLE READ` transaction on a PostgreSQL OLTP source and reads 3 large tables for 2 hours. The source keeps receiving heavy `UPDATE` traffic during that time. What is the main side effect on the **source**?
+A. Writers on those 3 tables are blocked until the extraction commits
+B. The extraction gradually sees rows committed by other sessions
+C. Old row versions cannot be vacuumed, so the tables bloat
+D. WAL segments are recycled early, breaking streaming replicas
+
+<details><summary>Answer</summary>
+
+**C.** Under MVCC readers don't block writers (A wrong), and a Repeatable Read snapshot is fixed at the start (B wrong). But the long-lived snapshot holds back the xmin horizon, so VACUUM cannot remove dead tuples created during those 2 hours → bloat. Mitigation: read from a replica, extract in shorter chunks, or use CDC.
+</details>
+
+**Q2.** An incremental job extracts `WHERE updated_at > :last_watermark`, then saves `max(updated_at)` of the extracted rows as the new watermark. Transaction T1 sets `updated_at = '10:00:00'` on a row but only **commits at 10:05**. The extraction runs at 10:03 and saves watermark `10:02:59`. What happens to T1's row?
+A. It is permanently missed, since its `updated_at` is below the new watermark
+B. It is picked up by the next run, since it commits after the watermark
+C. The 10:03 extraction waits for T1 to commit, then reads the row
+D. It is extracted twice, so the next load must deduplicate it
+
+<details><summary>Answer</summary>
+
+**A.** At 10:03 the row is uncommitted, so MVCC hides it. The watermark moves to 10:02:59, and when T1 commits the row still carries `10:00:00`, so no later run (`> 10:02:59`) ever matches it. `updated_at` is the *write* time, not the *commit* time. Fixes: a lookback/overlap window (`> watermark - N min`) plus an idempotent MERGE on PK (the overlap is what creates the duplicates in D), or log-based CDC ordered by commit LSN.
+</details>
+
+**Q3.** You build `dim_customer` as **SCD Type 2**. Which statement about keys is correct?
+A. `customer_id` (natural key) stays unique and serves as the dimension's PK
+B. Fact rows should store `customer_id` so they join to every historical version
+C. The surrogate key should be a hash of `customer_id` alone, for stable joins
+D. The surrogate key is unique per version; `customer_id` repeats across versions
+
+<details><summary>Answer</summary>
+
+**D.** SCD2 adds a new row per change, so the natural key repeats and cannot be the PK (A). Facts store the surrogate key of the version valid at event time; joining on the natural key fans out to every version (B). A hash of the natural key alone is identical for every version, so it is not unique (C).
+</details>
+
+**Q4.** Two instances of a load job start at the same time for the same `batch_id`. Each runs, in a `REPEATABLE READ` transaction: *"if `batch_id` is not in `load_log`, insert the batch rows and then insert `batch_id` into `load_log`"*. `load_log.batch_id` has **no unique constraint**. What happens?
+A. The second job gets a serialization error, so no duplicates are loaded
+B. Both jobs can pass the check and the batch is loaded twice
+C. The second job blocks on the first job's lock until it commits
+D. Repeatable Read takes a predicate lock that prevents the second insert
+
+<details><summary>Answer</summary>
+
+**B.** PostgreSQL Repeatable Read is snapshot isolation. Both snapshots see no `batch_id`, and both jobs *insert new rows* rather than update the same row, so there is no write conflict and no serialization error (phantom / write skew). There is no existing row to lock (C). Only `SERIALIZABLE` (SSI) detects this (A, D). Fix: a `UNIQUE` constraint on `load_log.batch_id` (insert it first to fail fast), or `SERIALIZABLE` + retry, or an idempotent target design (partition overwrite / MERGE).
+</details>
+
+**Q5.** You need to load 200M rows into an **empty** PostgreSQL staging table that has 4 secondary indexes. Which approach is usually fastest?
+A. Drop the indexes, load with `COPY`, then rebuild the 4 indexes afterwards
+B. Keep the indexes, and split the load into many small committed batches
+C. Keep the indexes, and use multi-row `INSERT` statements instead of `COPY`
+D. Create the indexes first, so `COPY` can write the rows in sorted order
+
+<details><summary>Answer</summary>
+
+**A.** Maintaining 4 B-trees row by row is much slower than building each index once in bulk after the data is loaded. `COPY` beats `INSERT` (C), many small commits add overhead (B), and indexes do not make the heap write in sorted order (D).
+</details>
+
+**Q6.** Two parallel jobs `MERGE` into the same `dim_product`. Their input files overlap in `product_id`, and each job processes rows in a different order. The jobs fail intermittently with `deadlock detected`. What is the most effective fix?
+A. Raise both jobs to `SERIALIZABLE` so conflicts are serialized safely
+B. Increase `lock_timeout` so each job waits longer before giving up
+C. Sort input by `product_id`, or split key ranges so the jobs never overlap
+D. Add more indexes on `dim_product` so each lock is held for less time
+
+<details><summary>Answer</summary>
+
+**C.** A deadlock is a circular wait caused by acquiring row locks in different orders. Taking locks in a consistent order (sorted keys), or making the key sets disjoint, removes the cycle. Serializable adds serialization failures instead (A); deadlock detection still fires regardless of `lock_timeout` (B); extra indexes slow the MERGE (D).
+</details>
+
+**Q7.** To protect the primary, extraction reads from an **async read replica** that currently lags 5 minutes. The job runs at 01:00 and saves **job start time (01:00)** as the new watermark. What is the risk?
+A. The replica rejects the long query, because replicas are read-only
+B. The replica returns uncommitted rows from the primary (dirty reads)
+C. Lag only delays writes on the replica; reads are always up to date
+D. Rows committed on the primary between 00:55 and 01:00 can be skipped forever
+
+<details><summary>Answer</summary>
+
+**D.** The replica only has data up to ~00:55. Saving 01:00 as the watermark skips everything in the 00:55–01:00 gap for good. Fix: take the watermark from the data actually read (`max(updated_at)` on the replica) or from replica replay time, plus an overlap window and an idempotent load.
+</details>
+
+**Q8.** An analyst runs `SELECT SUM(amount) FROM sales WHERE sale_date >= '2026-01-01'` on 500M rows and 80 columns. Why is a **columnar** warehouse usually much faster than a row-store OLTP DB with a B-tree index on `sale_date`?
+A. The columnar engine keeps the whole table in memory, so it never reads disk
+B. It reads only 2 compressed columns and skips blocks using min/max stats
+C. A B-tree index cannot be used on `DATE` columns, forcing a full table scan
+D. Columnar storage uses stricter isolation, so the scan takes no locks at all
+
+<details><summary>Answer</summary>
+
+**B.** Column pruning (2 of 80 columns), high compression of same-typed values, and zone maps / min-max statistics that skip blocks outside the date range. Over a large date range, a row store must read whole rows, and the B-tree may not even be chosen because selectivity is low.
 </details>
 
 ---
