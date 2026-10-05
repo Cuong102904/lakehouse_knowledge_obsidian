@@ -8,9 +8,9 @@
 
 ## Checklist trước buổi phỏng vấn
 
-- [ ] Ôn 4 câu HR trong [[On-thi-TPBank-Interview]] (nói ý chính, 60–90 giây mỗi câu).
+- [ ] Ôn các câu HR trong [[On-thi-TPBank-Interview]]: Câu 0 (giới thiệu) và 0b đã chốt, còn lại nói ý chính 60–90 giây mỗi câu.
 - [ ] Điền ví dụ cụ thể về TPBank vào câu 2.
-- [ ] Chuẩn bị câu giải thích vì sao lương giảm (15.5tr → 14tr).
+- [x] Câu giải thích vì sao lương giảm (15.5tr → 14.7tr, do thuế): đã có trong Câu 1. Còn kiểm tra form ghi con số nào.
 - [ ] Thuộc 5 câu hỏi ngược theo thứ tự **Việc → Công nghệ → Đánh giá → Hợp đồng → Cam kết**.
 - [ ] Mang sổ hoặc chuẩn bị ghi chú câu trả lời ngay sau buổi phỏng vấn.
 
