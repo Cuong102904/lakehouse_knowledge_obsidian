@@ -126,11 +126,9 @@
 - **Không nói quá:** CV viết "Built…", "Refactored 60+ DAGs…", "Cut… by ~60%". Khi bị hỏi sâu, nói rõ phạm vi: *"Phần này em làm cùng team, em phụ trách phần…"*.
 - Không dùng lại câu C4 trong note VNPT-IT (*"không ai giao, em tự phát hiện"*), vì không đúng sự thật.
 - Các thông tin trong form TPBank cần nói khớp: lương mong muốn 15tr (thấp nhất 13tr), ngày bắt đầu 01/11/2026, kế hoạch "ổn định, phát triển chuyên môn".
-- Câu hỏi ngược cho nhà tuyển dụng (chọn 2):
-  - Chương trình đào tạo kéo dài bao lâu, tiêu chí lên DE chính thức là gì?
-  - Fresh DE được phân về team nào, team đang dùng stack gì?
-  - Team dữ liệu hiện đang gặp thách thức lớn nhất ở đâu?
+- Câu hỏi ngược cho nhà tuyển dụng, phân tích JD và hợp đồng: xem [[On-thi-TPBank-Vong2]].
 
 ## Liên quan
 
 - [[On-thi-TPBank-MCQ]]: ôn phần kỹ thuật (vòng test).
+- [[On-thi-TPBank-Vong2]]: tổng quan vòng 2, JD, hợp đồng, câu hỏi ngược.
